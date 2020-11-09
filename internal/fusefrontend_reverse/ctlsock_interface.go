@@ -10,21 +10,22 @@ import (
 	"github.com/rfjakob/gocryptfs/internal/pathiv"
 )
 
-var _ ctlsocksrv.Interface = &ReverseFS{} // Verify that interface is implemented.
+// Verify that the interface is implemented.
+var _ ctlsocksrv.Interface = &RootNode{}
 
 // EncryptPath implements ctlsock.Backend.
 // This is used for the control socket and for the "-exclude" logic.
-func (rfs *ReverseFS) EncryptPath(plainPath string) (string, error) {
-	if rfs.args.PlaintextNames || plainPath == "" {
+func (rn *RootNode) EncryptPath(plainPath string) (string, error) {
+	if rn.args.PlaintextNames || plainPath == "" {
 		return plainPath, nil
 	}
 	cipherPath := ""
 	parts := strings.Split(plainPath, "/")
 	for _, part := range parts {
 		dirIV := pathiv.Derive(cipherPath, pathiv.PurposeDirIV)
-		encryptedPart := rfs.nameTransform.EncryptName(part, dirIV)
-		if rfs.args.LongNames && len(encryptedPart) > unix.NAME_MAX {
-			encryptedPart = rfs.nameTransform.HashLongName(encryptedPart)
+		encryptedPart := rn.nameTransform.EncryptName(part, dirIV)
+		if rn.args.LongNames && len(encryptedPart) > unix.NAME_MAX {
+			encryptedPart = rn.nameTransform.HashLongName(encryptedPart)
 		}
 		cipherPath = filepath.Join(cipherPath, encryptedPart)
 	}
@@ -32,7 +33,7 @@ func (rfs *ReverseFS) EncryptPath(plainPath string) (string, error) {
 }
 
 // DecryptPath implements ctlsock.Backend
-func (rfs *ReverseFS) DecryptPath(cipherPath string) (string, error) {
-	p, err := rfs.decryptPath(cipherPath)
+func (rn *RootNode) DecryptPath(cipherPath string) (string, error) {
+	p, err := rn.decryptPath(cipherPath)
 	return p, err
 }

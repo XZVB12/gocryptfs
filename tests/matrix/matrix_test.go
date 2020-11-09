@@ -72,6 +72,7 @@ func TestMain(m *testing.M) {
 		}
 		test_helpers.ResetTmpDir(!testcase.plaintextnames)
 		opts := []string{"-zerokey"}
+		//opts = append(opts, "-fusedebug")
 		opts = append(opts, fmt.Sprintf("-openssl=%v", testcase.openssl))
 		opts = append(opts, fmt.Sprintf("-plaintextnames=%v", testcase.plaintextnames))
 		opts = append(opts, fmt.Sprintf("-aessiv=%v", testcase.aessiv))
@@ -492,7 +493,7 @@ func TestLongNames(t *testing.T) {
 		t.Fatalf("Could not create n255x: %v", err)
 	}
 	f.Close()
-	if !test_helpers.VerifyExistence(wd + n255x) {
+	if !test_helpers.VerifyExistence(t, wd+n255x) {
 		t.Errorf("n255x is not in directory listing")
 	}
 	// Rename long to long (target does not exist)
@@ -501,7 +502,7 @@ func TestLongNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not rename n255x to n255y: %v", err)
 	}
-	if !test_helpers.VerifyExistence(wd + n255y) {
+	if !test_helpers.VerifyExistence(t, wd+n255y) {
 		t.Errorf("n255y is not in directory listing")
 	}
 	// Rename long to long (target exists)
@@ -514,7 +515,7 @@ func TestLongNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not rename n255x to n255y: %v", err)
 	}
-	if !test_helpers.VerifyExistence(wd + n255y) {
+	if !test_helpers.VerifyExistence(t, wd+n255y) {
 		t.Errorf("n255y is not in directory listing")
 	}
 	// Rename long to short (target does not exist)
@@ -522,7 +523,7 @@ func TestLongNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not rename n255y to short: %v", err)
 	}
-	if !test_helpers.VerifyExistence(wd + "short") {
+	if !test_helpers.VerifyExistence(t, wd+"short") {
 		t.Errorf("short is not in directory listing")
 	}
 	// Rename long to short (target exists)
@@ -535,7 +536,7 @@ func TestLongNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not rename n255y to short: %v", err)
 	}
-	if !test_helpers.VerifyExistence(wd + "short") {
+	if !test_helpers.VerifyExistence(t, wd+"short") {
 		t.Errorf("short is not in directory listing")
 	}
 	// Rename short to long (target does not exist)
@@ -543,7 +544,7 @@ func TestLongNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not rename short to n255x: %v", err)
 	}
-	if !test_helpers.VerifyExistence(wd + n255x) {
+	if !test_helpers.VerifyExistence(t, wd+n255x) {
 		t.Errorf("255x is not in directory listing II")
 	}
 	// Rename short to long (target exists)
@@ -556,7 +557,7 @@ func TestLongNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not rename short to n255x: %v", err)
 	}
-	if !test_helpers.VerifyExistence(wd + n255x) {
+	if !test_helpers.VerifyExistence(t, wd+n255x) {
 		t.Errorf("n255x is not in directory listing")
 	}
 	// Unlink
@@ -564,7 +565,7 @@ func TestLongNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not unlink n255x: %v", err)
 	}
-	if test_helpers.VerifyExistence(wd + n255x) {
+	if test_helpers.VerifyExistence(t, wd+n255x) {
 		t.Errorf("n255x still there after unlink")
 	}
 	// Long symlink
@@ -573,7 +574,7 @@ func TestLongNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !test_helpers.VerifyExistence(wd + n255s) {
+	if !test_helpers.VerifyExistence(t, wd+n255s) {
 		t.Errorf("n255s is not in directory listing")
 	}
 	err = syscall.Unlink(wd + n255s)
@@ -767,7 +768,7 @@ func TestMkfifo(t *testing.T) {
 // TestMagicNames verifies that "magic" names are handled correctly
 // https://github.com/rfjakob/gocryptfs/issues/174
 func TestMagicNames(t *testing.T) {
-	names := []string{"gocryptfs.longname.QhUr5d9FHerwEs--muUs6_80cy6JRp89c1otLwp92Cs", "gocryptfs.diriv"}
+	names := []string{"warmup1", "warmup2", "gocryptfs.longname.QhUr5d9FHerwEs--muUs6_80cy6JRp89c1otLwp92Cs", "gocryptfs.diriv"}
 	for _, n := range names {
 		t.Logf("Testing n=%q", n)
 		p := test_helpers.DefaultPlainDir + "/" + n
@@ -809,7 +810,7 @@ func TestMagicNames(t *testing.T) {
 		syscall.Unlink(p)
 		// Link
 		target := test_helpers.DefaultPlainDir + "/linktarget"
-		err = ioutil.WriteFile(target, []byte("yyyyy"), 0200)
+		err = ioutil.WriteFile(target, []byte("yyyyy"), 0600)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -870,5 +871,13 @@ func TestAccess(t *testing.T) {
 	err = unix.Access(path, unix.X_OK)
 	if err == nil {
 		t.Error("X_OK should have failed")
+	}
+}
+
+func TestStatfs(t *testing.T) {
+	var st syscall.Statfs_t
+	syscall.Statfs(test_helpers.DefaultPlainDir, &st)
+	if st.Bsize == 0 {
+		t.Errorf("statfs reports size zero: %#v", st)
 	}
 }

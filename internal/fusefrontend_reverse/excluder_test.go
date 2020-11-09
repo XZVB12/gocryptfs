@@ -9,15 +9,6 @@ import (
 	"github.com/rfjakob/gocryptfs/internal/fusefrontend"
 )
 
-func TestShouldNoCreateExcluderIfNoPattersWereSpecified(t *testing.T) {
-	var rfs ReverseFS
-	var args fusefrontend.Args
-	rfs.prepareExcluder(args)
-	if rfs.excluder != nil {
-		t.Error("Should not have created excluder")
-	}
-}
-
 func TestShouldPrefixExcludeValuesWithSlash(t *testing.T) {
 	var args fusefrontend.Args
 	args.Exclude = []string{"file1", "dir1/file2.txt"}
@@ -68,7 +59,7 @@ func TestShouldReadExcludePatternsFromFiles(t *testing.T) {
 }
 
 func TestShouldReturnFalseIfThereAreNoExclusions(t *testing.T) {
-	var rfs ReverseFS
+	var rfs RootNode
 	if rfs.isExcludedPlain("any/path") {
 		t.Error("Should not exclude any path if no exclusions were specified")
 	}

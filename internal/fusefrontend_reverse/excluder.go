@@ -2,6 +2,7 @@ package fusefrontend_reverse
 
 import (
 	"io/ioutil"
+	"log"
 	"os"
 	"strings"
 
@@ -14,15 +15,17 @@ import (
 
 // prepareExcluder creates an object to check if paths are excluded
 // based on the patterns specified in the command line.
-func (rfs *ReverseFS) prepareExcluder(args fusefrontend.Args) {
-	if len(args.Exclude) > 0 || len(args.ExcludeWildcard) > 0 || len(args.ExcludeFrom) > 0 {
-		excluder, err := ignore.CompileIgnoreLines(getExclusionPatterns(args)...)
-		if err != nil {
-			tlog.Fatal.Printf("Error compiling exclusion rules: %q", err)
-			os.Exit(exitcodes.ExcludeError)
-		}
-		rfs.excluder = excluder
+func prepareExcluder(args fusefrontend.Args) *ignore.GitIgnore {
+	patterns := getExclusionPatterns(args)
+	if len(patterns) == 0 {
+		log.Panic(patterns)
 	}
+	excluder, err := ignore.CompileIgnoreLines(patterns...)
+	if err != nil {
+		tlog.Fatal.Printf("Error compiling exclusion rules: %v", err)
+		os.Exit(exitcodes.ExcludeError)
+	}
+	return excluder
 }
 
 // getExclusionPatters prepares a list of patterns to be excluded.
@@ -57,10 +60,4 @@ func getLines(file string) ([]string, error) {
 		return nil, err
 	}
 	return strings.Split(string(buffer), "\n"), nil
-}
-
-// isExcludedPlain finds out if the plaintext path "pPath" is
-// excluded (used when -exclude is passed by the user).
-func (rfs *ReverseFS) isExcludedPlain(pPath string) bool {
-	return rfs.excluder != nil && rfs.excluder.MatchesPath(pPath)
 }

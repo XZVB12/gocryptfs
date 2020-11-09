@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 
@@ -26,7 +27,7 @@ func TestLongnameStat(t *testing.T) {
 		}
 		fd.Close()
 		path := dirC + "/" + name
-		if !test_helpers.VerifyExistence(path) {
+		if !test_helpers.VerifyExistence(t, path) {
 			t.Fatalf("failed to verify %q", path)
 		}
 		test_helpers.VerifySize(t, path, 0)
@@ -87,7 +88,7 @@ func TestSymlinkDentrySize(t *testing.T) {
 
 	fi, err := os.Lstat(mnt + "/" + symlinkResponse.Result)
 	if err != nil {
-		t.Errorf("Lstat: %v", err)
+		t.Fatalf("Lstat: %v", err)
 	}
 
 	target, err := os.Readlink(mnt + "/" + symlinkResponse.Result)
@@ -106,7 +107,7 @@ func TestSymlinkDentrySize(t *testing.T) {
 // gocryptfs.conf
 func TestConfigMapping(t *testing.T) {
 	c := dirB + "/gocryptfs.conf"
-	if !test_helpers.VerifyExistence(c) {
+	if !test_helpers.VerifyExistence(t, c) {
 		t.Errorf("%s missing", c)
 	}
 	data, err := ioutil.ReadFile(c)
@@ -248,4 +249,49 @@ func Test0100Dir(t *testing.T) {
 		t.Fatal(err)
 	}
 	fd.Close()
+}
+
+func TestStatfs(t *testing.T) {
+	var st syscall.Statfs_t
+	syscall.Statfs(dirB, &st)
+	if st.Bsize == 0 {
+		t.Errorf("statfs reports size zero: %#v", st)
+	}
+}
+
+// TestSeekData tests that fs.FileLseeker is implemented
+func TestSeekData(t *testing.T) {
+	if !plaintextnames {
+		t.Skip()
+	}
+
+	fn := filepath.Join(dirA, t.Name())
+	f, err := os.Create(fn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oneTiB int64 = 1024 * 1024 * 1024 * 1024
+	if _, err = f.Seek(oneTiB, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Write([]byte("foo")); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	const SEEK_DATA = 3
+
+	fn2 := filepath.Join(dirB, t.Name())
+	f, err = os.Open(fn2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	off, err := f.Seek(1024*1024, SEEK_DATA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off < oneTiB-1024*1024 {
+		t.Errorf("off=%d, expected=%d\n", off, oneTiB)
+	}
+	f.Close()
 }

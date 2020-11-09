@@ -22,10 +22,10 @@ func (n *NameTransformMock) DecryptName(cipherName string, iv []byte) (string, e
 	return "mockdecrypt_" + cipherName, nil
 }
 
-func createRFSWithMocks() (*ReverseFS, *IgnoreParserMock) {
+func createRFSWithMocks() (*RootNode, *IgnoreParserMock) {
 	ignorerMock := &IgnoreParserMock{}
 	nameTransformMock := &NameTransformMock{}
-	var rfs ReverseFS
+	var rfs RootNode
 	rfs.excluder = ignorerMock
 	rfs.nameTransform = nameTransformMock
 	return &rfs, ignorerMock

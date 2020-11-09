@@ -12,12 +12,11 @@
 #
 # Nowadays it should pass an indefinite number of iterations.
 
-if [[ -z $TMPDIR ]]; then
-	TMPDIR=/var/tmp
-	export TMPDIR
-fi
-
 set -eu
+
+# Init variables to default values if unset or empty
+export TMPDIR=${TMPDIR:-/var/tmp}
+DEBUG=${DEBUG:-0}
 
 cd "$(dirname "$0")"
 MYNAME=$(basename $0)
@@ -25,7 +24,7 @@ source ../fuse-unmount.bash
 
 # fsstress binary
 FSSTRESS=$HOME/fuse-xfstests/ltp/fsstress
-if [ ! -x $FSSTRESS ]
+if [[ ! -x $FSSTRESS ]]
 then
 	echo "$MYNAME: fsstress binary not found at $FSSTRESS"
 	echo "Please clone and compile https://github.com/rfjakob/fuse-xfstests"
@@ -47,21 +46,25 @@ for i in $(mount | cut -d" " -f3 | grep $TMPDIR/$MYNAME) ; do
 done
 
 # FS-specific compile and mount
-if [ $MYNAME = fsstress-loopback.bash ]; then
-	echo "Recompile go-fuse loopback"
+if [[ $MYNAME = fsstress-loopback.bash ]]; then
+	echo -n "Recompile go-fuse loopback: "
 	cd $GOPATH/src/github.com/hanwen/go-fuse/example/loopback
-	go build -race && go install
-	$GOPATH/bin/loopback -q $MNT $DIR &
+	git describe
+	go build && go install
+	OPTS="-q"
+	if [[ $DEBUG -eq 1 ]]; then
+		OPTS="-debug"
+	fi
+	$GOPATH/bin/loopback $OPTS "$MNT" "$DIR" &
 	disown
-elif [ $MYNAME = fsstress-gocryptfs.bash ]; then
+elif [[ $MYNAME = fsstress-gocryptfs.bash ]]; then
 	echo "Recompile gocryptfs"
 	cd $GOPATH/src/github.com/rfjakob/gocryptfs
-	./build.bash
+	./build.bash # also prints the version
 	$GOPATH/bin/gocryptfs -q -init -extpass "echo test" -scryptn=10 $DIR
-	$GOPATH/bin/gocryptfs -q -extpass "echo test" -nosyslog $DIR $MNT
-elif [ $MYNAME = fsstress-encfs.bash ]; then
-	# You probably want do adjust this path to your system
-	/home/jakob.donotbackup/encfs/build/encfs --extpass "echo test" --standard $DIR $MNT
+	$GOPATH/bin/gocryptfs -q -extpass "echo test" -nosyslog -fusedebug=$DEBUG $DIR $MNT
+elif [[ $MYNAME = fsstress-encfs.bash ]]; then
+	encfs --extpass "echo test" --standard $DIR $MNT
 else
 	echo Unknown mode: $MYNAME
 	exit 1
@@ -69,12 +72,12 @@ fi
 
 sleep 0.5
 echo -n "Waiting for mount: "
-while ! grep "$MNT fuse" /proc/self/mounts > /dev/null
+while ! grep "$(basename $MNT) fuse" /proc/self/mounts > /dev/null
 do
 	sleep 1
 	echo -n x
 done
-echo " ok"
+echo " ok: $MNT"
 
 # Cleanup trap
 trap "kill %1 ; cd / ; fuse-unmount -z $MNT ; rm -rf $DIR $MNT" EXIT
@@ -83,7 +86,7 @@ echo "Starting fsstress loop"
 N=1
 while true
 do
-	echo $N
+	echo "$N ................................. $(date)"
 	mkdir $MNT/fsstress.1
 	echo -n "    fsstress.1 "
 	$FSSTRESS -r -m 8 -n 1000 -d $MNT/fsstress.1 &
@@ -102,7 +105,7 @@ do
 	wait
 
 	echo "    rm"
-	rm -R $MNT/*
+	rm -Rf $MNT/*
 
 	let N=$N+1
 done

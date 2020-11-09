@@ -17,7 +17,7 @@ import (
 // a, err := rfs.abs(rfs.decryptPath(relPath))
 // abs never generates an error on its own. In other words, abs(p, nil) never
 // fails.
-func (rfs *ReverseFS) abs(relPath string, err error) (string, error) {
+func (rfs *RootNode) abs(relPath string, err error) (string, error) {
 	if err != nil {
 		return "", err
 	}
@@ -27,7 +27,7 @@ func (rfs *ReverseFS) abs(relPath string, err error) (string, error) {
 // rDecryptName decrypts the ciphertext name "cName", given the dirIV of the
 // directory "cName" lies in. The relative plaintext path to the directory
 // "pDir" is used if a "gocryptfs.longname.XYZ.name" must be resolved.
-func (rfs *ReverseFS) rDecryptName(cName string, dirIV []byte, pDir string) (pName string, err error) {
+func (rfs *RootNode) rDecryptName(cName string, dirIV []byte, pDir string) (pName string, err error) {
 	nameType := nametransform.NameType(cName)
 	if nameType == nametransform.LongNameNone {
 		pName, err = rfs.nameTransform.DecryptName(cName, dirIV)
@@ -47,9 +47,20 @@ func (rfs *ReverseFS) rDecryptName(cName string, dirIV []byte, pDir string) (pNa
 			return "", err
 		}
 	} else if nameType == nametransform.LongNameContent {
-		pName, err = rfs.findLongnameParent(pDir, dirIV, cName)
+		dirfd, err := syscallcompat.OpenDirNofollow(rfs.args.Cipherdir, filepath.Dir(pDir))
 		if err != nil {
 			return "", err
+		}
+		defer syscall.Close(dirfd)
+		fd, err := syscallcompat.Openat(dirfd, filepath.Base(pDir), syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+		if err != nil {
+			return "", err
+		}
+		defer syscall.Close(fd)
+		var errno syscall.Errno
+		pName, _, errno = rfs.findLongnameParent(fd, dirIV, cName)
+		if errno != 0 {
+			return "", errno
 		}
 	} else {
 		// It makes no sense to decrypt a ".name" file. This is a virtual file
@@ -63,36 +74,24 @@ func (rfs *ReverseFS) rDecryptName(cName string, dirIV []byte, pDir string) (pNa
 
 // decryptPath decrypts a relative ciphertext path to a relative plaintext
 // path.
-func (rfs *ReverseFS) decryptPath(relPath string) (string, error) {
-	if rfs.args.PlaintextNames || relPath == "" {
-		return relPath, nil
+func (rn *RootNode) decryptPath(cPath string) (string, error) {
+	if rn.args.PlaintextNames || cPath == "" {
+		return cPath, nil
 	}
-	// Check if the parent dir is in the cache
-	cDir := nametransform.Dir(relPath)
-	dirIV, pDir := rPathCache.lookup(cDir)
-	if dirIV != nil {
-		cName := filepath.Base(relPath)
-		pName, err := rfs.rDecryptName(cName, dirIV, pDir)
-		if err != nil {
-			return "", err
-		}
-		return filepath.Join(pDir, pName), nil
-	}
-	parts := strings.Split(relPath, "/")
+	parts := strings.Split(cPath, "/")
 	var transformedParts []string
 	for i := range parts {
 		// Start at the top and recurse
 		currentCipherDir := filepath.Join(parts[:i]...)
 		currentPlainDir := filepath.Join(transformedParts[:i]...)
-		dirIV = pathiv.Derive(currentCipherDir, pathiv.PurposeDirIV)
-		transformedPart, err := rfs.rDecryptName(parts[i], dirIV, currentPlainDir)
+		dirIV := pathiv.Derive(currentCipherDir, pathiv.PurposeDirIV)
+		transformedPart, err := rn.rDecryptName(parts[i], dirIV, currentPlainDir)
 		if err != nil {
 			return "", err
 		}
 		transformedParts = append(transformedParts, transformedPart)
 	}
 	pRelPath := filepath.Join(transformedParts...)
-	rPathCache.store(cDir, dirIV, nametransform.Dir(pRelPath))
 	return pRelPath, nil
 }
 
@@ -101,13 +100,24 @@ func (rfs *ReverseFS) decryptPath(relPath string) (string, error) {
 // and returns the fd to the directory and the decrypted name of the
 // target file. The fd/name pair is intended for use with fchownat and
 // friends.
-func (rfs *ReverseFS) openBackingDir(pRelPath string) (dirfd int, pName string, err error) {
-	// Open directory, safe against symlink races
-	pDir := filepath.Dir(pRelPath)
-	dirfd, err = syscallcompat.OpenDirNofollow(rfs.args.Cipherdir, pDir)
+func (rn *RootNode) openBackingDir(cPath string) (dirfd int, pPath string, err error) {
+	defer func() {
+		tlog.Debug.Printf("openBackingDir %q -> %d %q %v\n", cPath, dirfd, pPath, err)
+	}()
+	dirfd = -1
+	pPath, err = rn.decryptPath(cPath)
 	if err != nil {
-		return -1, "", err
+		return
 	}
-	pName = filepath.Base(pRelPath)
-	return dirfd, pName, nil
+	if rn.isExcludedPlain(pPath) {
+		err = syscall.EPERM
+		return
+	}
+	// Open directory, safe against symlink races
+	pDir := filepath.Dir(pPath)
+	dirfd, err = syscallcompat.OpenDirNofollow(rn.args.Cipherdir, pDir)
+	if err != nil {
+		return
+	}
+	return dirfd, pPath, nil
 }

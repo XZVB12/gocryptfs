@@ -51,6 +51,9 @@ func doInit() {
 	// Something like /tmp/gocryptfs-test-parent-1234
 	testParentDir := fmt.Sprintf("%s/gocryptfs-test-parent-%d", os.TempDir(), os.Getuid())
 	os.MkdirAll(testParentDir, 0755)
+	if !isExt4(testParentDir) {
+		fmt.Printf("test_helpers: warning: testParentDir %q does not reside on ext4, we will miss failures caused by ino reuse\n", testParentDir)
+	}
 	var err error
 	TmpDir, err = ioutil.TempDir(testParentDir, "")
 	if err != nil {
@@ -114,6 +117,23 @@ func ResetTmpDir(createDirIV bool) {
 			panic(err)
 		}
 	}
+}
+
+// isExt4 finds out if `path` resides on an ext4 filesystem, as reported by
+// statfs.
+func isExt4(path string) bool {
+	// From man statfs
+	const EXT4_SUPER_MAGIC = 0xef53
+
+	var fs syscall.Statfs_t
+	err := syscall.Statfs(path, &fs)
+	if err != nil {
+		return false
+	}
+	if fs.Type == EXT4_SUPER_MAGIC {
+		return true
+	}
+	return false
 }
 
 // InitFS creates a new empty cipherdir and calls
@@ -280,7 +300,7 @@ func TestRename(t *testing.T, plainDir string) {
 	}
 	err = syscall.Rename(file1, file2)
 	if err != nil {
-		t.Error(err)
+		t.Errorf("Rename: %v", err)
 		return
 	}
 	syscall.Unlink(file2)
@@ -289,7 +309,8 @@ func TestRename(t *testing.T, plainDir string) {
 // VerifyExistence checks in 3 ways that "path" exists:
 // stat, open, readdir. Returns true if the path exists, false otherwise.
 // Panics if the result is inconsistent.
-func VerifyExistence(path string) bool {
+func VerifyExistence(t *testing.T, path string) bool {
+	t.Helper()
 	// Check if file can be stat()ed
 	stat := true
 	fi, err := os.Stat(path)
@@ -309,12 +330,12 @@ func VerifyExistence(path string) bool {
 	name := filepath.Base(path)
 	d, err := os.Open(dir)
 	if err != nil && open == true {
-		log.Panicf("we can open the file but not the parent dir!? err=%v", err)
+		t.Errorf("VerifyExistence: we can open the file but not the parent dir!? err=%v", err)
 	} else if err == nil {
 		defer d.Close()
 		listing, err := d.Readdirnames(0)
 		if stat && fi.IsDir() && err != nil {
-			log.Panicf("It's a directory, but readdirnames failed: %v", err)
+			t.Errorf("VerifyExistence: It's a directory, but readdirnames failed: %v", err)
 		}
 		for _, entry := range listing {
 			if entry == name {
@@ -326,7 +347,7 @@ func VerifyExistence(path string) bool {
 	if stat == open && open == readdir {
 		return stat
 	}
-	log.Panicf("inconsistent result on %q: stat=%v open=%v readdir=%v, path=%q", name, stat, open, readdir, path)
+	t.Errorf("VerifyExistence: inconsistent result on %q: stat=%v open=%v readdir=%v, path=%q", name, stat, open, readdir, path)
 	return false
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/rfjakob/gocryptfs/internal/configfile"
 	"github.com/rfjakob/gocryptfs/internal/contentenc"
 	"github.com/rfjakob/gocryptfs/internal/exitcodes"
+	"github.com/rfjakob/gocryptfs/internal/fido2"
 	"github.com/rfjakob/gocryptfs/internal/readpassword"
 	"github.com/rfjakob/gocryptfs/internal/speed"
 	"github.com/rfjakob/gocryptfs/internal/stupidgcm"
@@ -50,7 +51,16 @@ func loadConfig(args *argContainer) (masterkey []byte, cf *configfile.ConfFile, 
 	if masterkey != nil {
 		return masterkey, cf, nil
 	}
-	pw := readpassword.Once([]string(args.extpass), []string(args.passfile), "")
+	var pw []byte
+	if cf.IsFeatureFlagSet(configfile.FlagFIDO2) {
+		if args.fido2 == "" {
+			tlog.Fatal.Printf("Masterkey encrypted using FIDO2 token; need to use the --fido2 option.")
+			os.Exit(exitcodes.Usage)
+		}
+		pw = fido2.Secret(args.fido2, cf.FIDO2.CredentialID, cf.FIDO2.HMACSalt)
+	} else {
+		pw = readpassword.Once([]string(args.extpass), []string(args.passfile), "")
+	}
 	tlog.Info.Println("Decrypting master key")
 	masterkey, err = cf.DecryptMasterKey(pw)
 	for i := range pw {
@@ -77,6 +87,10 @@ func changePassword(args *argContainer) {
 		}
 		if len(masterkey) == 0 {
 			log.Panic("empty masterkey")
+		}
+		if confFile.IsFeatureFlagSet(configfile.FlagFIDO2) {
+			tlog.Fatal.Printf("Password change is not supported on FIDO2-enabled filesystems.")
+			os.Exit(exitcodes.Usage)
 		}
 		tlog.Info.Println("Please enter your new password.")
 		newPw := readpassword.Twice([]string(args.extpass), []string(args.passfile))
@@ -147,6 +161,8 @@ func main() {
 	if os.Getenv("PATH") == "" {
 		os.Setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin")
 	}
+	// Show microseconds in go-fuse debug output (-fusedebug)
+	log.SetFlags(log.Lmicroseconds)
 	var err error
 	// Parse all command-line options (i.e. arguments starting with "-")
 	// into "args". Path arguments are parsed below.
@@ -313,7 +329,7 @@ func main() {
 	}
 	// "-fsck"
 	if args.fsck {
-		fsck(&args)
-		os.Exit(0)
+		code := fsck(&args)
+		os.Exit(code)
 	}
 }

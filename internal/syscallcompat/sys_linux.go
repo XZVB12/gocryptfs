@@ -27,6 +27,9 @@ const (
 
 	// O_PATH is only defined on Linux
 	O_PATH = unix.O_PATH
+
+	// RENAME_NOREPLACE is only defined on Linux
+	RENAME_NOREPLACE = unix.RENAME_NOREPLACE
 )
 
 var preallocWarn sync.Once
@@ -218,24 +221,24 @@ func SymlinkatUser(oldpath string, newdirfd int, newpath string, context *fuse.C
 }
 
 // MkdiratUser runs the Mkdirat syscall in the context of a different user.
-func MkdiratUser(dirfd int, path string, mode uint32, context *fuse.Context) (err error) {
-	if context != nil {
+func MkdiratUser(dirfd int, path string, mode uint32, caller *fuse.Caller) (err error) {
+	if caller != nil {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 
-		err = syscall.Setgroups(getSupplementaryGroups(context.Pid))
+		err = syscall.Setgroups(getSupplementaryGroups(caller.Pid))
 		if err != nil {
 			return err
 		}
 		defer syscall.Setgroups(nil)
 
-		err = syscall.Setregid(-1, int(context.Owner.Gid))
+		err = syscall.Setregid(-1, int(caller.Gid))
 		if err != nil {
 			return err
 		}
 		defer syscall.Setregid(-1, 0)
 
-		err = syscall.Setreuid(-1, int(context.Owner.Uid))
+		err = syscall.Setreuid(-1, int(caller.Uid))
 		if err != nil {
 			return err
 		}
@@ -262,12 +265,25 @@ func FutimesNano(fd int, a *time.Time, m *time.Time) (err error) {
 }
 
 // UtimesNanoAtNofollow is like UtimesNanoAt but never follows symlinks.
+// Retries on EINTR.
 func UtimesNanoAtNofollow(dirfd int, path string, a *time.Time, m *time.Time) (err error) {
 	ts := timesToTimespec(a, m)
-	return unix.UtimesNanoAt(dirfd, path, ts, unix.AT_SYMLINK_NOFOLLOW)
+	err = retryEINTR(func() error {
+		return unix.UtimesNanoAt(dirfd, path, ts, unix.AT_SYMLINK_NOFOLLOW)
+	})
+	return err
 }
 
 // Getdents syscall.
 func Getdents(fd int) ([]fuse.DirEntry, error) {
 	return getdents(fd)
+}
+
+// Renameat2 does not exist on Darwin, so we have to wrap it here.
+// Retries on EINTR.
+func Renameat2(olddirfd int, oldpath string, newdirfd int, newpath string, flags uint) (err error) {
+	err = retryEINTR(func() error {
+		return unix.Renameat2(olddirfd, oldpath, newdirfd, newpath, flags)
+	})
+	return err
 }

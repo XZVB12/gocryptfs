@@ -5,19 +5,29 @@ package fusefrontend
 
 import (
 	"testing"
+	"time"
+
+	"github.com/hanwen/go-fuse/v2/fs"
 
 	"github.com/rfjakob/gocryptfs/internal/contentenc"
 	"github.com/rfjakob/gocryptfs/internal/cryptocore"
 	"github.com/rfjakob/gocryptfs/internal/nametransform"
 )
 
-func newTestFS(args Args) *FS {
+func newTestFS(args Args) *RootNode {
 	// Init crypto backend
 	key := make([]byte, cryptocore.KeyLen)
 	cCore := cryptocore.New(key, cryptocore.BackendGoGCM, contentenc.DefaultIVBits, true, false)
 	cEnc := contentenc.New(cCore, contentenc.DefaultBS, false)
-	nameTransform := nametransform.New(cCore.EMECipher, true, true)
-	return NewFS(args, cEnc, nameTransform)
+	n := nametransform.New(cCore.EMECipher, true, true)
+	rn := NewRootNode(args, cEnc, n)
+	oneSec := time.Second
+	options := &fs.Options{
+		EntryTimeout: &oneSec,
+		AttrTimeout:  &oneSec,
+	}
+	fs.NewNodeFS(rn, options)
+	return rn
 }
 
 func TestEncryptDecryptXattrName(t *testing.T) {
